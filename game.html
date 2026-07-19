@@ -2,475 +2,848 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<title>Trash Sorting Game — เกมแยกขยะ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trash Sorting Game v2 — เกมแยกขยะ (Pastel Rainbow)</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; background: #111; overflow: hidden;
+  :root {
+    --pastelPink: #ffd6e8; --pastelPeach: #ffe9cc; --pastelYellow: #fdffc4;
+    --pastelGreen: #d6f8d6; --pastelBlue: #cce9ff; --pastelPurple: #e6d9ff;
+    --inkDark: #5a4a6a; --inkSoft: #8a7a9a;
+  }
+  html, body { width: 100%; height: 100%; overflow: hidden;
     font-family: "Segoe UI", "Sarabun", system-ui, sans-serif; }
-  #video { display: none; }
-  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  #overlay {
-    position: absolute; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 18px;
-    background: rgba(10, 15, 25, .88); color: #fff; z-index: 10; text-align: center;
+  body {
+    background: linear-gradient(135deg, var(--pastelPink), var(--pastelPeach),
+      var(--pastelYellow), var(--pastelGreen), var(--pastelBlue), var(--pastelPurple));
   }
-  #overlay h1 { font-size: 2.4rem; }
-  #overlay p { font-size: 1.05rem; color: #b9c4d8; max-width: 560px; line-height: 1.6; }
-  #startBtn {
-    font-size: 1.3rem; padding: 14px 46px; border: none; border-radius: 40px;
-    background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff;
-    cursor: pointer; font-weight: 700; box-shadow: 0 6px 20px rgba(46, 204, 113, .4);
+  canvas { position: absolute; inset: 0; display: block; }
+
+  .screen {
+    position: absolute; inset: 0; z-index: 20; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    padding: 20px; overflow-y: auto;
+    background: linear-gradient(135deg,
+      rgba(255,214,232,.95), rgba(255,233,204,.95), rgba(253,255,196,.95),
+      rgba(214,248,214,.95), rgba(204,233,255,.95), rgba(230,217,255,.95));
+    color: var(--inkDark); text-align: center;
   }
-  #startBtn:hover { transform: scale(1.05); }
-  #loading { display: none; color: #7fd8a5; font-size: 1rem; }
+  .screen.active { display: flex; }
+  .card {
+    background: rgba(255,255,255,.75); border-radius: 24px; padding: 34px 38px;
+    box-shadow: 0 10px 40px rgba(150,120,180,.25); max-width: 720px; width: 100%;
+    backdrop-filter: blur(6px);
+  }
+  h1 { font-size: 2.1rem; margin-bottom: 8px; }
+  .subtitle { color: var(--inkSoft); margin-bottom: 22px; line-height: 1.6; }
+  .fieldRow { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+  .fieldRow label { display: block; text-align: left; font-weight: 700; font-size: .9rem; margin-bottom: 6px; }
+  .fieldRow input {
+    font-size: 1.05rem; padding: 12px 16px; border-radius: 14px; width: 230px;
+    border: 3px solid var(--pastelPurple); background: #fff; color: var(--inkDark); outline: none;
+  }
+  .fieldRow input:focus { border-color: #c8a8f0; }
+  .btn {
+    font-size: 1.15rem; font-weight: 700; padding: 13px 40px; border: none;
+    border-radius: 40px; cursor: pointer; color: #fff; margin: 6px;
+    background: linear-gradient(135deg, #ff9ecb, #b39df2);
+    box-shadow: 0 6px 20px rgba(180,140,220,.4); transition: transform .15s;
+  }
+  .btn:hover { transform: translateY(-2px) scale(1.03); }
+  .btn.secondary { background: linear-gradient(135deg, #9fd8ff, #8ee6b8); }
+  .btn.ghost { background: rgba(255,255,255,.9); color: var(--inkDark);
+    border: 2px solid var(--pastelPurple); box-shadow: none; }
+  .errorMsg { color: #e06a8a; font-weight: 700; min-height: 22px; margin-bottom: 6px; }
+  .binLegend { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 14px 0 6px; }
+  .binChip { padding: 8px 16px; border-radius: 20px; font-size: .88rem; font-weight: 700; color: #5a4a6a; }
+
+  /* history */
+  .filterBar { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 18px; }
+  .filterBar select, .filterBar input {
+    font-size: .95rem; padding: 9px 13px; border-radius: 12px;
+    border: 3px solid var(--pastelBlue); background: #fff; color: var(--inkDark); outline: none;
+  }
+  .tableWrap { max-height: 46vh; overflow-y: auto; border-radius: 16px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 10px 14px; font-size: .93rem; text-align: left; }
+  th { position: sticky; top: 0; background: var(--pastelPurple); color: var(--inkDark); }
+  tr:nth-child(even) td { background: #faf6ff; }
+  td.scoreCell { font-weight: 800; color: #b06ad0; }
+  .emptyMsg { padding: 26px; color: var(--inkSoft); }
+  .medal { font-size: 1rem; }
+
+  .finalScore { font-size: 3.4rem; font-weight: 800; margin: 8px 0;
+    background: linear-gradient(90deg, #ff9ecb, #ffb987, #ffe66b, #7fe6a0, #7fc8ff, #b39df2);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .statRow { display: flex; gap: 26px; justify-content: center; margin-bottom: 18px; color: var(--inkSoft); font-weight: 700; }
 </style>
 </head>
 <body>
-<video id="video" playsinline></video>
-<canvas id="canvas"></canvas>
 
-<div id="overlay">
-  <h1>🗑️ Trash Sorting Game — เกมแยกขยะ</h1>
-  <p>
-    ใช้ <b>มือ</b> ของคุณผ่านกล้องเว็บแคม<br>
-    👌 <b>จีบนิ้ว</b> (นิ้วชี้ + นิ้วโป้ง) เพื่อ "หยิบ" ขยะ →
-    ลากไปที่ถังให้ถูกประเภท → คลายนิ้วเพื่อ "ปล่อย"<br>
-    ทิ้งถูกถัง +10 คะแนน | ทิ้งผิดถัง −5 คะแนน
-  </p>
-  <button id="startBtn">▶ เริ่มเกม (Start)</button>
-  <div id="loading">กำลังโหลดโมเดล Hand Tracking...</div>
+<!-- ===================== START SCREEN ===================== -->
+<div id="startScreen" class="screen active">
+  <div class="card">
+    <h1>🌈 Trash Sorting Game</h1>
+    <p class="subtitle">
+      เกมแยกขยะด้วยมือเปล่า — จีบนิ้ว 👌 หยิบขยะ ลากไปทิ้งให้ถูกถังภายใน 60 วินาที!<br>
+      ถูกถัง +10 | ผิดถัง −5
+    </p>
+    <div class="binLegend">
+      <span class="binChip" style="background:#bcdcff">🔵 ทั่วไป General</span>
+      <span class="binChip" style="background:#fff3ae">🟡 รีไซเคิล Recyclable</span>
+      <span class="binChip" style="background:#c0f2c8">🟢 เปียก Organic</span>
+      <span class="binChip" style="background:#ffc4c4">🔴 อันตราย Hazardous</span>
+    </div>
+    <div class="fieldRow">
+      <div>
+        <label for="playerNameInput">👤 ชื่อผู้เล่น (Player Name)</label>
+        <input id="playerNameInput" maxlength="20" placeholder="เช่น Namtan">
+      </div>
+      <div>
+        <label for="roomNameInput">🚪 ห้อง (Room)</label>
+        <input id="roomNameInput" maxlength="20" placeholder="เช่น ป.5/1">
+      </div>
+    </div>
+    <div id="startError" class="errorMsg"></div>
+    <button id="startGameBtn" class="btn">▶ เริ่มเกม (Start)</button>
+    <button id="openHistoryBtn" class="btn secondary">📊 ประวัติการเล่น (History)</button>
+    <p class="subtitle" style="margin-top:14px; font-size:.85rem;">
+      ต้องใช้เว็บแคม — โมเดล Handpose (ml5.js): <span id="modelStatus">กำลังโหลด...</span>
+    </p>
+  </div>
 </div>
 
-<!-- MediaPipe Hands (CDN) -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- ===================== GAME OVER SCREEN ===================== -->
+<div id="gameOverScreen" class="screen">
+  <div class="card">
+    <h1>⏰ หมดเวลา! (Time's Up)</h1>
+    <div class="finalScore" id="finalScoreText">0</div>
+    <div class="statRow">
+      <span id="finalPlayerText"></span>
+      <span id="finalCorrectText"></span>
+      <span id="finalWrongText"></span>
+    </div>
+    <button id="playAgainBtn" class="btn">🔁 เล่นอีกครั้ง (Play Again)</button>
+    <button id="historyFromEndBtn" class="btn secondary">📊 ดูประวัติ (History)</button>
+    <button id="backToMenuBtn" class="btn ghost">🏠 เปลี่ยนผู้เล่น (Menu)</button>
+  </div>
+</div>
+
+<!-- ===================== HISTORY SCREEN ===================== -->
+<div id="historyScreen" class="screen">
+  <div class="card" style="max-width:860px;">
+    <h1>📊 ประวัติการเล่น (Game History)</h1>
+    <div class="filterBar">
+      <select id="sortModeSelect" title="เรียงลำดับ">
+        <option value="scoreDesc">🏆 คะแนน (สูง → ต่ำ)</option>
+        <option value="nameAsc">🔤 ชื่อผู้เล่น (A → Z / ก → ฮ)</option>
+        <option value="roomAsc">🚪 ห้อง (A → Z)</option>
+        <option value="dateDesc">📅 วันที่เล่น (ใหม่ → เก่า)</option>
+        <option value="dateAsc">📅 วันที่เล่น (เก่า → ใหม่)</option>
+      </select>
+      <select id="roomFilterSelect" title="กรองตามห้อง">
+        <option value="">ทุกห้อง (All Rooms)</option>
+      </select>
+      <input id="nameFilterInput" placeholder="🔍 ค้นหาชื่อผู้เล่น...">
+      <button id="clearHistoryBtn" class="btn ghost" style="padding:8px 18px; font-size:.9rem;">🗑️ ล้างประวัติ</button>
+    </div>
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>👤 ชื่อ</th><th>🚪 ห้อง</th><th>🏆 คะแนน</th><th>✔/✘</th><th>📅 วันที่เล่น</th></tr>
+        </thead>
+        <tbody id="historyTableBody"></tbody>
+      </table>
+      <div id="historyEmptyMsg" class="emptyMsg" style="display:none;">ยังไม่มีประวัติการเล่น — เล่นเกมแรกของคุณเลย!</div>
+    </div>
+    <div style="margin-top:18px;">
+      <button id="closeHistoryBtn" class="btn">⬅ กลับ (Back)</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
 
 <script>
 "use strict";
 
 /* ============================== CONFIG ============================== */
-const CONFIG = {
-  pinchOn: 0.40,        // pinch begins when (thumb-index dist / hand size) < this
-  pinchOff: 0.55,       // pinch ends when ratio > this (hysteresis prevents flicker)
-  grabRadius: 70,       // px — how close cursor must be to grab an item
+const gameConfig = {
+  roundDuration: 60,        // seconds per round
+  pinchOnRatio: 0.45,       // pinch begins below this (thumb-index / hand size)
+  pinchOffRatio: 0.62,      // pinch ends above this (hysteresis)
+  grabRadius: 75,           // px
   maxItems: 4,
-  spawnEveryMs: 1800,
+  spawnEveryMs: 1700,
   scoreCorrect: 10,
   scoreWrong: -5,
-  cursorSmoothing: 0.45 // 0..1, higher = snappier
+  cursorSmoothing: 0.45,
+  historyStorageKey: "trashSortGameHistory"
 };
 
-/* ========================= CATEGORIES & ITEMS ======================= */
-const CATEGORIES = {
-  general:    { label: "ทั่วไป",    en: "General",    color: "#2980d9", emoji: "🔵" },
-  recyclable: { label: "รีไซเคิล",  en: "Recyclable", color: "#f1c40f", emoji: "🟡" },
-  organic:    { label: "เปียก",     en: "Organic",    color: "#27ae60", emoji: "🟢" },
-  hazardous:  { label: "อันตราย",   en: "Hazardous",  color: "#e74c3c", emoji: "🔴" }
+/* ================== PASTEL THEME / CATEGORIES / ITEMS =============== */
+const binCategories = {
+  general:    { labelTh: "ทั่วไป",   labelEn: "General",    fillColor: "#bcdcff", edgeColor: "#7fb5f0" },
+  recyclable: { labelTh: "รีไซเคิล", labelEn: "Recyclable", fillColor: "#fff3ae", edgeColor: "#e8cf6a" },
+  organic:    { labelTh: "เปียก",    labelEn: "Organic",    fillColor: "#c0f2c8", edgeColor: "#7fd898" },
+  hazardous:  { labelTh: "อันตราย",  labelEn: "Hazardous",  fillColor: "#ffc4c4", edgeColor: "#f08a8a" }
 };
 
-const TRASH_TYPES = [
-  { emoji: "🍬", name: "ซองขนม",       cat: "general" },
-  { emoji: "🧻", name: "ทิชชู่ใช้แล้ว", cat: "general" },
-  { emoji: "🥡", name: "กล่องโฟม",     cat: "general" },
-  { emoji: "🧃", name: "กล่องเครื่องดื่ม", cat: "general" },
-  { emoji: "🍾", name: "ขวดแก้ว",      cat: "recyclable" },
-  { emoji: "🥫", name: "กระป๋อง",      cat: "recyclable" },
-  { emoji: "📰", name: "กระดาษ",       cat: "recyclable" },
-  { emoji: "🧴", name: "ขวดพลาสติก",   cat: "recyclable" },
-  { emoji: "🍌", name: "เปลือกกล้วย",  cat: "organic" },
-  { emoji: "🍎", name: "เศษผลไม้",     cat: "organic" },
-  { emoji: "🍗", name: "เศษอาหาร",     cat: "organic" },
-  { emoji: "🥬", name: "เศษผัก",       cat: "organic" },
-  { emoji: "🔋", name: "ถ่านไฟฉาย",    cat: "hazardous" },
-  { emoji: "💡", name: "หลอดไฟ",       cat: "hazardous" },
-  { emoji: "📱", name: "มือถือเก่า",   cat: "hazardous" },
-  { emoji: "🧪", name: "สารเคมี",      cat: "hazardous" }
+const trashTypes = [
+  { emoji: "🍬", itemName: "ซองขนม",        category: "general" },
+  { emoji: "🧻", itemName: "ทิชชู่ใช้แล้ว",  category: "general" },
+  { emoji: "🥡", itemName: "กล่องโฟม",      category: "general" },
+  { emoji: "🧃", itemName: "กล่องเครื่องดื่ม", category: "general" },
+  { emoji: "🍾", itemName: "ขวดแก้ว",       category: "recyclable" },
+  { emoji: "🥫", itemName: "กระป๋อง",       category: "recyclable" },
+  { emoji: "📰", itemName: "กระดาษ",        category: "recyclable" },
+  { emoji: "🧴", itemName: "ขวดพลาสติก",    category: "recyclable" },
+  { emoji: "🍌", itemName: "เปลือกกล้วย",   category: "organic" },
+  { emoji: "🍎", itemName: "เศษผลไม้",      category: "organic" },
+  { emoji: "🍗", itemName: "เศษอาหาร",      category: "organic" },
+  { emoji: "🥬", itemName: "เศษผัก",        category: "organic" },
+  { emoji: "🔋", itemName: "ถ่านไฟฉาย",     category: "hazardous" },
+  { emoji: "💡", itemName: "หลอดไฟ",        category: "hazardous" },
+  { emoji: "📱", itemName: "มือถือเก่า",    category: "hazardous" },
+  { emoji: "🧪", itemName: "สารเคมี",       category: "hazardous" }
 ];
 
-/* ============================ GAME STATE ============================ */
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const rainbowPastels = ["#ffb3c8", "#ffd2a8", "#fff3a8", "#b8f0c0", "#a8d8ff", "#d4bdf5"];
 
-let W = 0, H = 0;
-let items = [];            // active trash items
-let bins = [];             // bin rects, computed on resize
-let particles = [];        // effect particles
-let floatTexts = [];       // "+10" / "-5" popups
-let score = 0, correctCount = 0, wrongCount = 0;
-let lastSpawn = 0;
+/* ============================ GAME STATE ============================ */
+let gameState = "menu";        // "menu" | "playing" | "ended"
+let captureVideo = null;
+let handPoseModel = null;
+let modelReady = false;
+let videoReady = false;
+let detectedHands = [];
+
+let currentPlayerName = "";
+let currentRoomName = "";
+let currentScore = 0;
+let correctCount = 0;
+let wrongCount = 0;
+
+let trashItems = [];
+let trashBins = [];
+let effectParticles = [];
+let floatingTexts = [];
+let lastSpawnTime = 0;
 let nextItemId = 1;
 
-const hand = {
+let roundStartMillis = 0;
+let timeLeft = gameConfig.roundDuration;
+let lastTickSecond = -1;
+let recordSaved = false;
+
+const handCursor = {
   present: false,
-  x: 0, y: 0,              // smoothed cursor (midpoint of thumb & index tips)
-  rawX: 0, rawY: 0,
+  x: 0, y: 0,
   pinching: false,
-  grabbedId: null,
-  landmarks: null
+  grabbedId: null
 };
 
-let audioCtx = null;
+let audioContext = null;
 
-/* ============================== SETUP =============================== */
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+/* =========================== P5 LIFECYCLE =========================== */
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  textAlign(CENTER, CENTER);
+  layoutBins();
+
+  // Preload the ml5 Handpose model in the background (flipped for mirror view)
+  handPoseModel = ml5.handPose({ maxHands: 1, flipped: true }, () => {
+    modelReady = true;
+    const statusEl = document.getElementById("modelStatus");
+    if (statusEl) { statusEl.textContent = "พร้อมแล้ว ✅"; statusEl.style.color = "#3daf6e"; }
+  });
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
   layoutBins();
 }
-window.addEventListener("resize", resize);
+
+function draw() {
+  if (gameState !== "playing") { drawIdleBackground(); return; }
+
+  drawVideoBackground();
+  updateTimer();
+  handleSpawning();
+  drawBins();
+  drawTrashItems();
+  drawEffects();
+  drawHandCursor();
+  drawHud();
+}
+
+/* ======================= CAMERA & HAND TRACKING ===================== */
+function startCameraIfNeeded() {
+  if (captureVideo) return;
+  captureVideo = createCapture(VIDEO, () => {
+    videoReady = true;
+    handPoseModel.detectStart(captureVideo, gotHands);
+  });
+  captureVideo.size(640, 480);
+  captureVideo.hide();
+}
+
+function gotHands(results) {
+  detectedHands = results || [];
+  if (gameState !== "playing") return;
+
+  if (detectedHands.length > 0) {
+    const keypoints = detectedHands[0].keypoints;
+    const wristPoint = keypoints[0];
+    const thumbTip = keypoints[4];
+    const indexTip = keypoints[8];
+    const middleMcp = keypoints[9];
+
+    handCursor.present = true;
+    const midVideoX = (thumbTip.x + indexTip.x) / 2;
+    const midVideoY = (thumbTip.y + indexTip.y) / 2;
+    const screenPos = videoToScreen(midVideoX, midVideoY);
+    handCursor.x += (screenPos.x - handCursor.x) * gameConfig.cursorSmoothing;
+    handCursor.y += (screenPos.y - handCursor.y) * gameConfig.cursorSmoothing;
+
+    const handSize = dist(wristPoint.x, wristPoint.y, middleMcp.x, middleMcp.y) || 1e-6;
+    const pinchRatio = dist(thumbTip.x, thumbTip.y, indexTip.x, indexTip.y) / handSize;
+
+    if (!handCursor.pinching && pinchRatio < gameConfig.pinchOnRatio) {
+      handCursor.pinching = true;
+      tryGrabItem();
+    } else if (handCursor.pinching && pinchRatio > gameConfig.pinchOffRatio) {
+      handCursor.pinching = false;
+      tryDropItem();
+    }
+  } else {
+    if (handCursor.pinching) { handCursor.pinching = false; tryDropItem(); }
+    handCursor.present = false;
+  }
+}
+
+// Map a point in video pixel space (already flipped by ml5) onto the cover-fitted canvas
+function videoToScreen(videoX, videoY) {
+  const videoW = (captureVideo && captureVideo.elt.videoWidth) || 640;
+  const videoH = (captureVideo && captureVideo.elt.videoHeight) || 480;
+  const scaleFactor = Math.max(width / videoW, height / videoH);
+  const offsetX = (width - videoW * scaleFactor) / 2;
+  const offsetY = (height - videoH * scaleFactor) / 2;
+  return { x: videoX * scaleFactor + offsetX, y: videoY * scaleFactor + offsetY };
+}
+
+/* ============================ GAME LOGIC ============================ */
+function startRound() {
+  currentScore = 0; correctCount = 0; wrongCount = 0;
+  trashItems = []; effectParticles = []; floatingTexts = [];
+  handCursor.grabbedId = null; handCursor.pinching = false;
+  nextItemId = 1;
+  recordSaved = false;
+  roundStartMillis = millis();
+  timeLeft = gameConfig.roundDuration;
+  lastTickSecond = -1;
+  lastSpawnTime = millis();
+  spawnTrashItem(); spawnTrashItem();
+  gameState = "playing";
+}
+
+function updateTimer() {
+  timeLeft = Math.max(0, gameConfig.roundDuration - (millis() - roundStartMillis) / 1000);
+  const wholeSecond = Math.ceil(timeLeft);
+  if (wholeSecond !== lastTickSecond) {
+    lastTickSecond = wholeSecond;
+    if (wholeSecond <= 3 && wholeSecond > 0) playBeep(660, 0.12, "sine", 0.2);
+  }
+  if (timeLeft <= 0) endRound();
+}
+
+function endRound() {
+  if (gameState !== "playing") return;
+  gameState = "ended";
+  handCursor.grabbedId = null; handCursor.pinching = false;
+  playBeep(520, 0.15, "sine", 0.25);
+  setTimeout(() => playBeep(390, 0.3, "sine", 0.25), 160);
+  saveGameRecord();
+  document.getElementById("finalScoreText").textContent = `${currentScore} คะแนน`;
+  document.getElementById("finalPlayerText").textContent = `👤 ${currentPlayerName} (${currentRoomName})`;
+  document.getElementById("finalCorrectText").textContent = `✔ ถูก ${correctCount}`;
+  document.getElementById("finalWrongText").textContent = `✘ ผิด ${wrongCount}`;
+  showScreen("gameOverScreen");
+}
+
+function handleSpawning() {
+  if (millis() - lastSpawnTime > gameConfig.spawnEveryMs) {
+    spawnTrashItem();
+    lastSpawnTime = millis();
+  }
+}
+
+function spawnTrashItem() {
+  if (trashItems.length >= gameConfig.maxItems) return;
+  const chosenType = random(trashTypes);
+  const itemRadius = 44;
+  trashItems.push({
+    id: nextItemId++,
+    emoji: chosenType.emoji,
+    itemName: chosenType.itemName,
+    category: chosenType.category,
+    x: random(itemRadius + 40, width - itemRadius - 40),
+    y: random(120, height * 0.5),
+    r: itemRadius,
+    bobPhase: random(TWO_PI),
+    grabbed: false,
+    popScale: 0
+  });
+}
+
+function tryGrabItem() {
+  if (handCursor.grabbedId !== null) return;
+  let bestItem = null;
+  let bestDistance = gameConfig.grabRadius;
+  for (const item of trashItems) {
+    const d = dist(item.x, item.y, handCursor.x, handCursor.y);
+    if (d < bestDistance) { bestItem = item; bestDistance = d; }
+  }
+  if (bestItem) {
+    bestItem.grabbed = true;
+    handCursor.grabbedId = bestItem.id;
+    playBeep(600, 0.06, "sine", 0.15);
+  }
+}
+
+function tryDropItem() {
+  if (handCursor.grabbedId === null) return;
+  const droppedItem = trashItems.find(item => item.id === handCursor.grabbedId);
+  handCursor.grabbedId = null;
+  if (!droppedItem) return;
+  droppedItem.grabbed = false;
+
+  const targetBin = trashBins.find(bin =>
+    droppedItem.x > bin.x && droppedItem.x < bin.x + bin.w &&
+    droppedItem.y > bin.y - 30 && droppedItem.y < bin.y + bin.h);
+  if (!targetBin) return;
+
+  const isCorrect = targetBin.categoryKey === droppedItem.category;
+  trashItems = trashItems.filter(item => item.id !== droppedItem.id);
+
+  if (isCorrect) {
+    currentScore += gameConfig.scoreCorrect; correctCount++;
+    targetBin.flash = 1; targetBin.flashColor = "#7fe6a0";
+    addFloatingText(`+${gameConfig.scoreCorrect}`, droppedItem.x, droppedItem.y, "#3daf6e");
+    burstParticles(droppedItem.x, droppedItem.y);
+    playBeep(880, 0.1, "sine", 0.2);
+    setTimeout(() => playBeep(1320, 0.12, "sine", 0.2), 90);
+  } else {
+    currentScore += gameConfig.scoreWrong; wrongCount++;
+    targetBin.flash = 1; targetBin.flashColor = "#f08a8a";
+    addFloatingText(`${gameConfig.scoreWrong}`, droppedItem.x, droppedItem.y, "#e06a8a");
+    addFloatingText(`❌ ${droppedItem.itemName} → ถัง${binCategories[droppedItem.category].labelTh}`,
+      width / 2, height * 0.32, "#e06a8a");
+    playBeep(200, 0.25, "sawtooth", 0.15);
+  }
+}
+
+/* ============================== RENDER ============================== */
+function drawIdleBackground() {
+  // soft animated pastel wash behind the overlay screens
+  background("#f6f0ff");
+}
+
+function drawVideoBackground() {
+  background("#f6f0ff");
+  if (captureVideo && videoReady) {
+    const videoW = captureVideo.elt.videoWidth || 640;
+    const videoH = captureVideo.elt.videoHeight || 480;
+    const scaleFactor = Math.max(width / videoW, height / videoH);
+    const drawW = videoW * scaleFactor;
+    const drawH = videoH * scaleFactor;
+    push();
+    translate(width, 0); scale(-1, 1); // mirror view
+    image(captureVideo, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
+    pop();
+  }
+  // pastel wash on top of the video
+  noStroke();
+  fill(255, 240, 250, 60);
+  rect(0, 0, width, height);
+}
 
 function layoutBins() {
-  const keys = Object.keys(CATEGORIES);
-  const bw = Math.min(190, (W - 60) / 4);
-  const bh = Math.min(150, H * 0.2);
-  const gap = (W - bw * 4) / 5;
-  bins = keys.map((key, i) => ({
-    key,
-    x: gap + i * (bw + gap),
-    y: H - bh - 12,
-    w: bw, h: bh,
+  const categoryKeys = Object.keys(binCategories);
+  const binW = Math.min(190, (width - 60) / 4);
+  const binH = Math.min(150, height * 0.2);
+  const gapX = (width - binW * 4) / 5;
+  trashBins = categoryKeys.map((categoryKey, i) => ({
+    categoryKey,
+    x: gapX + i * (binW + gapX),
+    y: height - binH - 12,
+    w: binW, h: binH,
     flash: 0, flashColor: null
   }));
 }
 
-/* ============================ TRASH ITEMS =========================== */
-function spawnItem() {
-  if (items.length >= CONFIG.maxItems) return;
-  const type = TRASH_TYPES[Math.floor(Math.random() * TRASH_TYPES.length)];
-  const r = 44;
-  items.push({
-    id: nextItemId++,
-    ...type,
-    x: r + 40 + Math.random() * (W - 2 * r - 80),
-    y: 120 + Math.random() * (H * 0.4),
-    r,
-    bobPhase: Math.random() * Math.PI * 2,
-    grabbed: false,
-    scale: 0    // pop-in animation
-  });
-}
-
-/* =========================== HAND TRACKING ========================== */
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-
-function onResults(results) {
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const lm = results.multiHandLandmarks[0];
-    hand.present = true;
-    hand.landmarks = lm;
-
-    // Cursor = midpoint of thumb tip (4) and index tip (8). Mirror X.
-    const cx = (1 - (lm[4].x + lm[8].x) / 2) * W;
-    const cy = ((lm[4].y + lm[8].y) / 2) * H;
-    hand.rawX = cx; hand.rawY = cy;
-    hand.x += (cx - hand.x) * CONFIG.cursorSmoothing;
-    hand.y += (cy - hand.y) * CONFIG.cursorSmoothing;
-
-    // Pinch detection: thumb-index distance relative to hand size (wrist→middle MCP)
-    const handSize = dist(lm[0], lm[9]) || 1e-6;
-    const ratio = dist(lm[4], lm[8]) / handSize;
-
-    if (!hand.pinching && ratio < CONFIG.pinchOn) {
-      hand.pinching = true;
-      tryGrab();
-    } else if (hand.pinching && ratio > CONFIG.pinchOff) {
-      hand.pinching = false;
-      tryDrop();
-    }
-  } else {
-    if (hand.pinching) { hand.pinching = false; tryDrop(); }
-    hand.present = false;
-    hand.landmarks = null;
-  }
-}
-
-function tryGrab() {
-  if (hand.grabbedId !== null) return;
-  let best = null, bestD = CONFIG.grabRadius;
-  for (const it of items) {
-    const d = Math.hypot(it.x - hand.x, it.y - hand.y);
-    if (d < bestD) { best = it; bestD = d; }
-  }
-  if (best) {
-    best.grabbed = true;
-    hand.grabbedId = best.id;
-    beep(600, 0.06, "sine", 0.15);
-  }
-}
-
-function tryDrop() {
-  if (hand.grabbedId === null) return;
-  const it = items.find(i => i.id === hand.grabbedId);
-  hand.grabbedId = null;
-  if (!it) return;
-  it.grabbed = false;
-
-  const bin = bins.find(b =>
-    it.x > b.x && it.x < b.x + b.w && it.y > b.y - 30 && it.y < b.y + b.h);
-
-  if (!bin) return; // dropped in open space — item stays
-
-  const correct = bin.key === it.cat;
-  items = items.filter(i => i.id !== it.id);
-
-  if (correct) {
-    score += CONFIG.scoreCorrect; correctCount++;
-    bin.flash = 1; bin.flashColor = "#2ecc71";
-    addFloatText(`+${CONFIG.scoreCorrect}`, it.x, it.y, "#2ecc71");
-    burstParticles(it.x, it.y, CATEGORIES[bin.key].color);
-    beep(880, 0.1, "sine", 0.2); setTimeout(() => beep(1320, 0.12, "sine", 0.2), 90);
-  } else {
-    score += CONFIG.scoreWrong; wrongCount++;
-    bin.flash = 1; bin.flashColor = "#e74c3c";
-    addFloatText(`${CONFIG.scoreWrong}`, it.x, it.y, "#e74c3c");
-    addFloatText(`❌ ${it.name} → ถัง${CATEGORIES[it.cat].label}`, W / 2, H * 0.35, "#ff8a80");
-    beep(200, 0.25, "sawtooth", 0.15);
-  }
-}
-
-/* ============================== EFFECTS ============================= */
-function addFloatText(text, x, y, color) {
-  floatTexts.push({ text, x, y, color, life: 1 });
-}
-function burstParticles(x, y, color) {
-  for (let i = 0; i < 24; i++) {
-    const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 5;
-    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2,
-      r: 3 + Math.random() * 4, color, life: 1 });
-  }
-}
-function beep(freq, dur, type, vol) {
-  if (!audioCtx) return;
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = type; o.frequency.value = freq;
-  g.gain.setValueAtTime(vol, audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-  o.connect(g).connect(audioCtx.destination);
-  o.start(); o.stop(audioCtx.currentTime + dur);
-}
-
-/* ============================== RENDER ============================== */
-function drawVideo() {
-  ctx.save();
-  ctx.translate(W, 0); ctx.scale(-1, 1); // mirror so it feels natural
-  // cover-fit the video into the canvas
-  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-  const s = Math.max(W / vw, H / vh);
-  const dw = vw * s, dh = vh * s;
-  ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
-  ctx.restore();
-  // slight dark tint for readability
-  ctx.fillStyle = "rgba(0,0,0,0.18)";
-  ctx.fillRect(0, 0, W, H);
-}
-
 function drawBins() {
-  for (const b of bins) {
-    const cat = CATEGORIES[b.key];
-    ctx.save();
-    // flash effect
-    if (b.flash > 0) {
-      ctx.shadowColor = b.flashColor; ctx.shadowBlur = 40 * b.flash;
-      b.flash = Math.max(0, b.flash - 0.03);
+  for (const bin of trashBins) {
+    const category = binCategories[bin.categoryKey];
+    push();
+    if (bin.flash > 0) {
+      drawingContext.shadowColor = bin.flashColor;
+      drawingContext.shadowBlur = 45 * bin.flash;
+      bin.flash = Math.max(0, bin.flash - 0.03);
     }
-    // body
-    roundRect(b.x, b.y, b.w, b.h, 14);
-    ctx.fillStyle = cat.color + "cc";
-    ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.85)";
-    ctx.stroke();
-    // lid
-    roundRect(b.x - 6, b.y - 12, b.w + 12, 18, 8);
-    ctx.fillStyle = cat.color;
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
+    stroke(255); strokeWeight(3);
+    fill(category.fillColor);
+    rect(bin.x, bin.y, bin.w, bin.h, 16);
+    fill(category.edgeColor);
+    rect(bin.x - 6, bin.y - 12, bin.w + 12, 18, 8);
+    pop();
 
-    // labels
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#fff";
-    ctx.font = `bold ${Math.min(26, b.w * 0.15)}px sans-serif`;
-    ctx.fillText(`🗑️ ${cat.label}`, b.x + b.w / 2, b.y + b.h * 0.45);
-    ctx.font = `${Math.min(18, b.w * 0.11)}px sans-serif`;
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.fillText(cat.en, b.x + b.w / 2, b.y + b.h * 0.72);
+    noStroke();
+    fill("#5a4a6a");
+    textSize(Math.min(24, bin.w * 0.14));
+    textStyle(BOLD);
+    text(`🗑️ ${category.labelTh}`, bin.x + bin.w / 2, bin.y + bin.h * 0.42);
+    textStyle(NORMAL);
+    textSize(Math.min(16, bin.w * 0.1));
+    fill("#8a7a9a");
+    text(category.labelEn, bin.x + bin.w / 2, bin.y + bin.h * 0.7);
   }
 }
 
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-function drawItems(t) {
-  for (const it of items) {
-    if (it.scale < 1) it.scale = Math.min(1, it.scale + 0.08); // pop-in
-    if (it.grabbed) {
-      it.x += (hand.x - it.x) * 0.5;
-      it.y += (hand.y - it.y) * 0.5;
+function drawTrashItems() {
+  for (const item of trashItems) {
+    if (item.popScale < 1) item.popScale = Math.min(1, item.popScale + 0.08);
+    if (item.grabbed) {
+      item.x += (handCursor.x - item.x) * 0.5;
+      item.y += (handCursor.y - item.y) * 0.5;
     } else {
-      it.y += Math.sin(t / 600 + it.bobPhase) * 0.3; // gentle float
+      item.y += Math.sin(millis() / 600 + item.bobPhase) * 0.3;
     }
-    ctx.save();
-    ctx.translate(it.x, it.y);
-    const sc = it.scale * (it.grabbed ? 1.25 : 1);
-    ctx.scale(sc, sc);
-    if (it.grabbed) { ctx.shadowColor = "#fff"; ctx.shadowBlur = 25; }
-    // background disc
-    ctx.beginPath(); ctx.arc(0, 0, it.r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = it.grabbed ? "#fff" : CATEGORIES[it.cat].color;
-    ctx.stroke();
-    // emoji
-    ctx.font = `${it.r * 1.1}px sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(it.emoji, 0, 4);
-    ctx.restore();
-    // name tag
-    ctx.font = "bold 14px sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#fff";
-    ctx.shadowColor = "#000"; ctx.shadowBlur = 4;
-    ctx.fillText(it.name, it.x, it.y + it.r + 20);
-    ctx.shadowBlur = 0;
+    const renderScale = item.popScale * (item.grabbed ? 1.25 : 1);
+    push();
+    translate(item.x, item.y);
+    scale(renderScale);
+    if (item.grabbed) { drawingContext.shadowColor = "#fff"; drawingContext.shadowBlur = 25; }
+    stroke(item.grabbed ? "#ffffff" : binCategories[item.category].edgeColor);
+    strokeWeight(3);
+    fill(255, 255, 255, 225);
+    circle(0, 0, item.r * 2);
+    noStroke();
+    textSize(item.r * 1.1);
+    text(item.emoji, 0, 3);
+    pop();
+
+    textSize(14);
+    textStyle(BOLD);
+    fill("#5a4a6a");
+    stroke(255); strokeWeight(3);
+    text(item.itemName, item.x, item.y + item.r + 20);
+    noStroke();
+    textStyle(NORMAL);
   }
 }
 
-function drawHand() {
-  if (!hand.present) return;
-  // fingertip skeleton dots (subtle)
-  if (hand.landmarks) {
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    for (const i of [0, 5, 9, 13, 17]) {
-      const p = hand.landmarks[i];
-      ctx.beginPath();
-      ctx.arc((1 - p.x) * W, p.y * H, 5, 0, Math.PI * 2);
-      ctx.fill();
-    }
+function drawHandCursor() {
+  if (!handCursor.present) {
+    textSize(20);
+    fill("#5a4a6a");
+    stroke(255); strokeWeight(4);
+    text("✋ ยกมือขึ้นให้กล้องเห็น (Show your hand)", width / 2, 96);
+    noStroke();
+    return;
   }
-  // cursor
-  ctx.save();
-  ctx.translate(hand.x, hand.y);
-  ctx.lineWidth = 4;
-  if (hand.pinching) {
-    ctx.strokeStyle = "#2ecc71"; ctx.fillStyle = "rgba(46,204,113,0.35)";
-    ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.font = "22px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("👌", 0, 1);
+  push();
+  translate(handCursor.x, handCursor.y);
+  strokeWeight(4);
+  if (handCursor.pinching) {
+    stroke("#7fe6a0"); fill(127, 230, 160, 90);
+    circle(0, 0, 46);
+    noStroke(); textSize(22); text("👌", 0, 1);
   } else {
-    ctx.strokeStyle = "#fff"; ctx.fillStyle = "rgba(255,255,255,0.15)";
-    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.font = "24px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("✋", 0, 1);
+    stroke("#b39df2"); fill(255, 255, 255, 70);
+    circle(0, 0, 62);
+    noStroke(); textSize(24); text("✋", 0, 1);
   }
-  ctx.restore();
+  pop();
 }
 
 function drawEffects() {
-  // particles
-  for (const p of particles) {
-    p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.life -= 0.02;
-    ctx.globalAlpha = Math.max(0, p.life);
-    ctx.fillStyle = p.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+  for (const particle of effectParticles) {
+    particle.x += particle.vx; particle.y += particle.vy;
+    particle.vy += 0.25; particle.life -= 0.02;
+    noStroke();
+    const particleColor = color(particle.hex);
+    particleColor.setAlpha(255 * Math.max(0, particle.life));
+    fill(particleColor);
+    circle(particle.x, particle.y, particle.r * 2);
   }
-  ctx.globalAlpha = 1;
-  particles = particles.filter(p => p.life > 0);
+  effectParticles = effectParticles.filter(particle => particle.life > 0);
 
-  // float texts
-  for (const f of floatTexts) {
-    f.y -= 1.2; f.life -= 0.012;
-    ctx.globalAlpha = Math.max(0, f.life);
-    ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";
-    ctx.fillStyle = f.color;
-    ctx.shadowColor = "#000"; ctx.shadowBlur = 6;
-    ctx.fillText(f.text, f.x, f.y);
-    ctx.shadowBlur = 0;
+  for (const floatText of floatingTexts) {
+    floatText.y -= 1.2; floatText.life -= 0.012;
+    textSize(28); textStyle(BOLD);
+    const textColor = color(floatText.hex);
+    textColor.setAlpha(255 * Math.max(0, floatText.life));
+    fill(textColor);
+    stroke(255); strokeWeight(4);
+    text(floatText.textValue, floatText.x, floatText.y);
+    noStroke(); textStyle(NORMAL);
   }
-  ctx.globalAlpha = 1;
-  floatTexts = floatTexts.filter(f => f.life > 0);
+  floatingTexts = floatingTexts.filter(floatText => floatText.life > 0);
 }
 
-function drawHUD() {
-  ctx.save();
-  roundRect(16, 14, 300, 74, 12);
-  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fill();
-  ctx.fillStyle = "#fff"; ctx.textAlign = "left";
-  ctx.font = "bold 30px sans-serif";
-  ctx.fillText(`⭐ ${score}`, 34, 52);
-  ctx.font = "16px sans-serif";
-  ctx.fillStyle = "#7fd8a5";
-  ctx.fillText(`✔ ถูก ${correctCount}`, 150, 42);
-  ctx.fillStyle = "#ff8a80";
-  ctx.fillText(`✘ ผิด ${wrongCount}`, 150, 68);
-  ctx.restore();
+function drawHud() {
+  // score card
+  push();
+  noStroke();
+  fill(255, 255, 255, 200);
+  rect(16, 14, 250, 74, 16);
+  fill("#5a4a6a"); textAlign(LEFT, CENTER); textStyle(BOLD); textSize(28);
+  text(`⭐ ${currentScore}`, 34, 42);
+  textSize(15); textStyle(NORMAL);
+  fill("#3daf6e"); text(`✔ ถูก ${correctCount}`, 150, 34);
+  fill("#e06a8a"); text(`✘ ผิด ${wrongCount}`, 150, 62);
+  pop();
+  textAlign(CENTER, CENTER);
 
-  if (!hand.present) {
-    ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.shadowColor = "#000"; ctx.shadowBlur = 6;
-    ctx.fillText("✋ ยกมือขึ้นให้กล้องเห็น (Show your hand to the camera)", W / 2, 60);
-    ctx.shadowBlur = 0;
+  // countdown timer
+  const secondsShown = Math.ceil(timeLeft);
+  const urgent = secondsShown <= 10;
+  const pulse = urgent ? 1 + 0.08 * Math.sin(millis() / 120) : 1;
+  push();
+  translate(width / 2, 48);
+  scale(pulse);
+  noStroke();
+  fill(urgent ? color(255, 180, 195, 230) : color(255, 255, 255, 200));
+  rect(-78, -32, 156, 64, 20);
+  fill(urgent ? "#d84a6a" : "#5a4a6a");
+  textStyle(BOLD); textSize(34);
+  text(`⏱ ${secondsShown}`, 0, 2);
+  pop();
+  textStyle(NORMAL);
+
+  // timer progress bar (rainbow)
+  const barW = 320;
+  const progress = timeLeft / gameConfig.roundDuration;
+  push();
+  noStroke();
+  fill(255, 255, 255, 160);
+  rect(width / 2 - barW / 2, 88, barW, 12, 6);
+  for (let i = 0; i < 6; i++) {
+    const segW = (barW * progress) / 6;
+    fill(rainbowPastels[i]);
+    rect(width / 2 - barW / 2 + i * segW, 88, segW + 1, 12,
+      i === 0 ? 6 : 0, i === 5 ? 6 : 0, i === 5 ? 6 : 0, i === 0 ? 6 : 0);
+  }
+  pop();
+
+  // player tag
+  push();
+  noStroke();
+  fill(255, 255, 255, 200);
+  rect(width - 236, 14, 220, 44, 14);
+  fill("#5a4a6a"); textSize(15); textStyle(BOLD);
+  text(`👤 ${currentPlayerName} · 🚪 ${currentRoomName}`, width - 126, 36);
+  pop();
+  textStyle(NORMAL);
+}
+
+/* ============================== EFFECTS ============================= */
+function addFloatingText(textValue, x, y, hex) {
+  floatingTexts.push({ textValue, x, y, hex, life: 1 });
+}
+
+function burstParticles(x, y) {
+  for (let i = 0; i < 26; i++) {
+    const angle = random(TWO_PI);
+    const speed = random(2, 7);
+    effectParticles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      r: random(3, 7),
+      hex: random(rainbowPastels),
+      life: 1
+    });
   }
 }
 
-/* ============================ MAIN LOOP ============================= */
-function loop(t) {
-  ctx.clearRect(0, 0, W, H);
-  if (video.readyState >= 2) drawVideo();
-
-  if (t - lastSpawn > CONFIG.spawnEveryMs) { spawnItem(); lastSpawn = t; }
-
-  drawBins();
-  drawItems(t);
-  drawEffects();
-  drawHand();
-  drawHUD();
-  requestAnimationFrame(loop);
+function playBeep(freq, dur, waveType, volume) {
+  if (!audioContext) return;
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+  oscillator.type = waveType;
+  oscillator.frequency.value = freq;
+  gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + dur);
+  oscillator.connect(gainNode).connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + dur);
 }
 
-/* =============================== BOOT =============================== */
-document.getElementById("startBtn").addEventListener("click", async () => {
-  const btn = document.getElementById("startBtn");
-  const loading = document.getElementById("loading");
-  btn.style.display = "none"; loading.style.display = "block";
-
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  resize();
-
-  const hands = new Hands({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-  });
-  hands.setOptions({
-    maxNumHands: 1,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.6,
-    minTrackingConfidence: 0.6
-  });
-  hands.onResults(onResults);
-
-  const camera = new Camera(video, {
-    onFrame: async () => { await hands.send({ image: video }); },
-    width: 1280, height: 720
-  });
-
+/* ======================= HISTORY (localStorage) ===================== */
+function loadHistory() {
   try {
-    await camera.start();
+    const rawValue = localStorage.getItem(gameConfig.historyStorageKey);
+    const parsedValue = rawValue ? JSON.parse(rawValue) : [];
+    return Array.isArray(parsedValue) ? parsedValue : [];
   } catch (err) {
-    loading.textContent = "❌ เปิดกล้องไม่ได้: " + err.message;
+    return [];
+  }
+}
+
+function saveGameRecord() {
+  if (recordSaved) return;
+  recordSaved = true;
+  const historyRecords = loadHistory();
+  historyRecords.push({
+    playerName: currentPlayerName,
+    roomName: currentRoomName,
+    score: currentScore,
+    correctCount,
+    wrongCount,
+    playedAt: new Date().toISOString()
+  });
+  try {
+    localStorage.setItem(gameConfig.historyStorageKey, JSON.stringify(historyRecords));
+  } catch (err) {
+    console.warn("ไม่สามารถบันทึกประวัติได้:", err);
+  }
+}
+
+function formatPlayedDate(isoString) {
+  const dateObj = new Date(isoString);
+  const dd = String(dateObj.getDate()).padStart(2, "0");
+  const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const yyyy = dateObj.getFullYear();
+  const hh = String(dateObj.getHours()).padStart(2, "0");
+  const mi = String(dateObj.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+function renderHistoryTable() {
+  const sortMode = document.getElementById("sortModeSelect").value;
+  const roomFilter = document.getElementById("roomFilterSelect").value;
+  const nameFilter = document.getElementById("nameFilterInput").value.trim().toLowerCase();
+
+  let historyRecords = loadHistory();
+
+  // populate the room filter options (keep current selection)
+  const roomFilterSelect = document.getElementById("roomFilterSelect");
+  const uniqueRooms = [...new Set(loadHistory().map(record => record.roomName))].sort();
+  const previousValue = roomFilterSelect.value;
+  roomFilterSelect.innerHTML = '<option value="">ทุกห้อง (All Rooms)</option>' +
+    uniqueRooms.map(room => `<option value="${escapeHtml(room)}">${escapeHtml(room)}</option>`).join("");
+  roomFilterSelect.value = uniqueRooms.includes(previousValue) ? previousValue : "";
+
+  // filter
+  if (roomFilter) historyRecords = historyRecords.filter(record => record.roomName === roomFilter);
+  if (nameFilter) historyRecords = historyRecords.filter(record =>
+    record.playerName.toLowerCase().includes(nameFilter));
+
+  // sort
+  const sortFunctions = {
+    scoreDesc: (a, b) => b.score - a.score,
+    nameAsc: (a, b) => a.playerName.localeCompare(b.playerName, "th"),
+    roomAsc: (a, b) => a.roomName.localeCompare(b.roomName, "th") || b.score - a.score,
+    dateDesc: (a, b) => new Date(b.playedAt) - new Date(a.playedAt),
+    dateAsc: (a, b) => new Date(a.playedAt) - new Date(b.playedAt)
+  };
+  historyRecords.sort(sortFunctions[sortMode] || sortFunctions.scoreDesc);
+
+  const tableBody = document.getElementById("historyTableBody");
+  const emptyMsg = document.getElementById("historyEmptyMsg");
+  const medals = ["🥇", "🥈", "🥉"];
+  tableBody.innerHTML = historyRecords.map((record, i) => `
+    <tr>
+      <td>${sortMode === "scoreDesc" && i < 3 ? `<span class="medal">${medals[i]}</span>` : i + 1}</td>
+      <td>${escapeHtml(record.playerName)}</td>
+      <td>${escapeHtml(record.roomName)}</td>
+      <td class="scoreCell">${record.score}</td>
+      <td>✔${record.correctCount ?? "-"} / ✘${record.wrongCount ?? "-"}</td>
+      <td>${formatPlayedDate(record.playedAt)}</td>
+    </tr>`).join("");
+  emptyMsg.style.display = historyRecords.length === 0 ? "block" : "none";
+}
+
+function escapeHtml(rawText) {
+  return String(rawText)
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+}
+
+/* ============================ UI WIRING ============================= */
+let historyReturnScreen = "startScreen";
+
+function showScreen(screenId) {
+  for (const screenEl of document.querySelectorAll(".screen")) {
+    screenEl.classList.toggle("active", screenEl.id === screenId);
+  }
+}
+
+function hideAllScreens() {
+  for (const screenEl of document.querySelectorAll(".screen")) {
+    screenEl.classList.remove("active");
+  }
+}
+
+document.getElementById("startGameBtn").addEventListener("click", () => {
+  const playerNameValue = document.getElementById("playerNameInput").value.trim();
+  const roomNameValue = document.getElementById("roomNameInput").value.trim();
+  const errorEl = document.getElementById("startError");
+  if (!playerNameValue || !roomNameValue) {
+    errorEl.textContent = "⚠️ กรุณากรอกชื่อผู้เล่นและห้องก่อนเริ่มเกม";
     return;
   }
+  if (!modelReady) {
+    errorEl.textContent = "⏳ โมเดล Handpose กำลังโหลด รอสักครู่แล้วลองอีกครั้ง";
+    return;
+  }
+  errorEl.textContent = "";
+  currentPlayerName = playerNameValue;
+  currentRoomName = roomNameValue;
+  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  startCameraIfNeeded();
+  hideAllScreens();
+  startRound();
+});
 
-  document.getElementById("overlay").style.display = "none";
-  lastSpawn = performance.now();
-  spawnItem(); spawnItem();
-  requestAnimationFrame(loop);
+document.getElementById("playAgainBtn").addEventListener("click", () => {
+  hideAllScreens();
+  startRound();
+});
+
+document.getElementById("backToMenuBtn").addEventListener("click", () => {
+  gameState = "menu";
+  showScreen("startScreen");
+});
+
+document.getElementById("openHistoryBtn").addEventListener("click", () => {
+  historyReturnScreen = "startScreen";
+  renderHistoryTable();
+  showScreen("historyScreen");
+});
+
+document.getElementById("historyFromEndBtn").addEventListener("click", () => {
+  historyReturnScreen = "gameOverScreen";
+  renderHistoryTable();
+  showScreen("historyScreen");
+});
+
+document.getElementById("closeHistoryBtn").addEventListener("click", () => {
+  showScreen(historyReturnScreen);
+});
+
+document.getElementById("sortModeSelect").addEventListener("change", renderHistoryTable);
+document.getElementById("roomFilterSelect").addEventListener("change", renderHistoryTable);
+document.getElementById("nameFilterInput").addEventListener("input", renderHistoryTable);
+
+document.getElementById("clearHistoryBtn").addEventListener("click", () => {
+  if (confirm("ล้างประวัติการเล่นทั้งหมด?")) {
+    localStorage.removeItem(gameConfig.historyStorageKey);
+    renderHistoryTable();
+  }
 });
 </script>
 </body>
