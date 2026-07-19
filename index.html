@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trash Sorting Game — เกมแยกขยะด้วยมือเปล่า</title>
+<meta name="description" content="เกมแยกขยะแบบอินเทอร์แอคทีฟ ควบคุมด้วยมือผ่านเว็บแคม ใช้ MediaPipe Hand Tracking — จีบนิ้วเพื่อหยิบขยะ ลากไปทิ้งให้ถูกถัง!">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0d1420; --card: #16202f; --text: #e8eef7; --muted: #9db0c9;
+    --green: #2ecc71; --blue: #2980d9; --yellow: #f1c40f; --red: #e74c3c;
+  }
+  body {
+    font-family: "Segoe UI", "Sarabun", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+  }
+  .hero {
+    min-height: 72vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 60px 20px 40px;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(46,204,113,.18), transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(41,128,217,.18), transparent 50%),
+      radial-gradient(ellipse at 50% 90%, rgba(241,196,15,.10), transparent 55%);
+  }
+  .hero .emoji-row { font-size: 3.2rem; letter-spacing: 12px; margin-bottom: 18px; }
+  h1 { font-size: clamp(2rem, 5vw, 3.4rem); margin-bottom: 10px; }
+  h1 .accent { color: var(--green); }
+  .tagline { font-size: clamp(1rem, 2.2vw, 1.25rem); color: var(--muted); max-width: 640px; margin-bottom: 34px; }
+  .play-btn {
+    display: inline-block; font-size: 1.35rem; font-weight: 700;
+    padding: 16px 58px; border-radius: 50px; text-decoration: none; color: #fff;
+    background: linear-gradient(135deg, #2ecc71, #1e9e56);
+    box-shadow: 0 8px 30px rgba(46,204,113,.35);
+    transition: transform .15s, box-shadow .15s;
+  }
+  .play-btn:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 12px 40px rgba(46,204,113,.5); }
+  .hint { margin-top: 16px; font-size: .9rem; color: var(--muted); }
+  section { max-width: 1000px; margin: 0 auto; padding: 56px 20px; }
+  h2 { text-align: center; font-size: 1.9rem; margin-bottom: 36px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px; }
+  .step {
+    background: var(--card); border-radius: 16px; padding: 26px 20px; text-align: center;
+    border: 1px solid rgba(255,255,255,.06);
+  }
+  .step .icon { font-size: 2.6rem; margin-bottom: 12px; }
+  .step h3 { font-size: 1.1rem; margin-bottom: 8px; }
+  .step p { font-size: .92rem; color: var(--muted); }
+  .bins { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+  .bin { border-radius: 16px; padding: 24px 18px; text-align: center; color: #fff; }
+  .bin h3 { font-size: 1.25rem; margin-bottom: 6px; }
+  .bin p { font-size: .9rem; opacity: .92; }
+  .bin.general { background: linear-gradient(160deg, #2980d9, #1c5c9e); }
+  .bin.recycle { background: linear-gradient(160deg, #f1c40f, #b8940a); }
+  .bin.organic { background: linear-gradient(160deg, #27ae60, #1a7a43); }
+  .bin.hazard  { background: linear-gradient(160deg, #e74c3c, #a83226); }
+  .tech { text-align: center; color: var(--muted); font-size: .95rem; }
+  .tech .badges { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+  .badge {
+    background: var(--card); border: 1px solid rgba(255,255,255,.1);
+    padding: 8px 18px; border-radius: 30px; font-size: .88rem; color: var(--text);
+  }
+  footer { text-align: center; padding: 30px 20px 40px; color: var(--muted); font-size: .85rem; }
+  .cta-bottom { text-align: center; padding-bottom: 70px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="emoji-row">🍌 🍾 🔋 🧻</div>
+  <h1>Trash Sorting Game<br><span class="accent">เกมแยกขยะด้วยมือเปล่า</span></h1>
+  <p class="tagline">
+    ไม่ต้องใช้เมาส์ ไม่ต้องแตะจอ — ใช้ <b>มือของคุณ</b> ผ่านกล้องเว็บแคม
+    จีบนิ้ว 👌 หยิบขยะ ลากไปทิ้งให้ถูกถัง เรียนรู้การแยกขยะแบบสนุก ๆ
+  </p>
+  <a class="play-btn" href="game.html">▶ เล่นเลย (Play Now)</a>
+  <div class="hint">ต้องใช้เว็บแคม + เบราว์เซอร์ Chrome / Edge — อนุญาตการใช้กล้องเมื่อถูกถาม</div>
+</div>
+
+<section>
+  <h2>🎮 วิธีเล่น (How to Play)</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="icon">📷</div>
+      <h3>1. เปิดกล้อง</h3>
+      <p>กด Start แล้วอนุญาตให้เว็บใช้กล้อง — ตัวคุณคือฉากหลังของเกม</p>
+    </div>
+    <div class="step">
+      <div class="icon">✋</div>
+      <h3>2. ยกมือขึ้น</h3>
+      <p>ระบบ Hand Tracking จะจับตำแหน่งมือของคุณแบบเรียลไทม์</p>
+    </div>
+    <div class="step">
+      <div class="icon">👌</div>
+      <h3>3. จีบนิ้วเพื่อหยิบ</h3>
+      <p>เลื่อนมือไปที่ขยะ แล้วจีบนิ้วชี้ + นิ้วโป้งเพื่อคว้าไว้</p>
+    </div>
+    <div class="step">
+      <div class="icon">🗑️</div>
+      <h3>4. ลากไปทิ้ง</h3>
+      <p>ลากไปที่ถังให้ถูกประเภท คลายนิ้วเพื่อปล่อย — ถูกถัง +10 ผิดถัง −5</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>🗑️ รู้จักถังขยะทั้ง 4 ประเภท</h2>
+  <div class="bins">
+    <div class="bin general">
+      <h3>🔵 ทั่วไป<br>General</h3>
+      <p>ซองขนม กล่องโฟม ทิชชู่ — ขยะย่อยสลายยากและรีไซเคิลไม่ได้</p>
+    </div>
+    <div class="bin recycle">
+      <h3>🟡 รีไซเคิล<br>Recyclable</h3>
+      <p>ขวดแก้ว กระป๋อง กระดาษ ขวดพลาสติก — นำกลับมาใช้ใหม่ได้</p>
+    </div>
+    <div class="bin organic">
+      <h3>🟢 เปียก<br>Organic</h3>
+      <p>เศษอาหาร เปลือกผลไม้ เศษผัก — ย่อยสลายได้ ทำปุ๋ยหมักได้</p>
+    </div>
+    <div class="bin hazard">
+      <h3>🔴 อันตราย<br>Hazardous</h3>
+      <p>ถ่านไฟฉาย หลอดไฟ สารเคมี อุปกรณ์อิเล็กทรอนิกส์</p>
+    </div>
+  </div>
+</section>
+
+<section class="tech">
+  <h2>⚙️ เทคโนโลยีเบื้องหลัง</h2>
+  <p>Computer Vision ทำงานทั้งหมดในเบราว์เซอร์ของคุณ — ไม่มีการส่งภาพขึ้นเซิร์ฟเวอร์</p>
+  <div class="badges">
+    <span class="badge">MediaPipe Hands — 21-point hand tracking</span>
+    <span class="badge">HTML5 Canvas</span>
+    <span class="badge">Web Audio API</span>
+    <span class="badge">Vanilla JavaScript</span>
+  </div>
+</section>
+
+<div class="cta-bottom">
+  <a class="play-btn" href="game.html">▶ เริ่มเล่นเลย</a>
+</div>
+
+<footer>
+  Trash Sorting Game — เกมเพื่อการเรียนรู้การแยกขยะ · สร้างด้วย MediaPipe Hand Tracking
+</footer>
+
+</body>
+</html>

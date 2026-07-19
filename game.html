@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Trash Sorting Game — เกมแยกขยะ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #111; overflow: hidden;
+    font-family: "Segoe UI", "Sarabun", system-ui, sans-serif; }
+  #video { display: none; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: rgba(10, 15, 25, .88); color: #fff; z-index: 10; text-align: center;
+  }
+  #overlay h1 { font-size: 2.4rem; }
+  #overlay p { font-size: 1.05rem; color: #b9c4d8; max-width: 560px; line-height: 1.6; }
+  #startBtn {
+    font-size: 1.3rem; padding: 14px 46px; border: none; border-radius: 40px;
+    background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff;
+    cursor: pointer; font-weight: 700; box-shadow: 0 6px 20px rgba(46, 204, 113, .4);
+  }
+  #startBtn:hover { transform: scale(1.05); }
+  #loading { display: none; color: #7fd8a5; font-size: 1rem; }
+</style>
+</head>
+<body>
+<video id="video" playsinline></video>
+<canvas id="canvas"></canvas>
+
+<div id="overlay">
+  <h1>🗑️ Trash Sorting Game — เกมแยกขยะ</h1>
+  <p>
+    ใช้ <b>มือ</b> ของคุณผ่านกล้องเว็บแคม<br>
+    👌 <b>จีบนิ้ว</b> (นิ้วชี้ + นิ้วโป้ง) เพื่อ "หยิบ" ขยะ →
+    ลากไปที่ถังให้ถูกประเภท → คลายนิ้วเพื่อ "ปล่อย"<br>
+    ทิ้งถูกถัง +10 คะแนน | ทิ้งผิดถัง −5 คะแนน
+  </p>
+  <button id="startBtn">▶ เริ่มเกม (Start)</button>
+  <div id="loading">กำลังโหลดโมเดล Hand Tracking...</div>
+</div>
+
+<!-- MediaPipe Hands (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+"use strict";
+
+/* ============================== CONFIG ============================== */
+const CONFIG = {
+  pinchOn: 0.40,        // pinch begins when (thumb-index dist / hand size) < this
+  pinchOff: 0.55,       // pinch ends when ratio > this (hysteresis prevents flicker)
+  grabRadius: 70,       // px — how close cursor must be to grab an item
+  maxItems: 4,
+  spawnEveryMs: 1800,
+  scoreCorrect: 10,
+  scoreWrong: -5,
+  cursorSmoothing: 0.45 // 0..1, higher = snappier
+};
+
+/* ========================= CATEGORIES & ITEMS ======================= */
+const CATEGORIES = {
+  general:    { label: "ทั่วไป",    en: "General",    color: "#2980d9", emoji: "🔵" },
+  recyclable: { label: "รีไซเคิล",  en: "Recyclable", color: "#f1c40f", emoji: "🟡" },
+  organic:    { label: "เปียก",     en: "Organic",    color: "#27ae60", emoji: "🟢" },
+  hazardous:  { label: "อันตราย",   en: "Hazardous",  color: "#e74c3c", emoji: "🔴" }
+};
+
+const TRASH_TYPES = [
+  { emoji: "🍬", name: "ซองขนม",       cat: "general" },
+  { emoji: "🧻", name: "ทิชชู่ใช้แล้ว", cat: "general" },
+  { emoji: "🥡", name: "กล่องโฟม",     cat: "general" },
+  { emoji: "🧃", name: "กล่องเครื่องดื่ม", cat: "general" },
+  { emoji: "🍾", name: "ขวดแก้ว",      cat: "recyclable" },
+  { emoji: "🥫", name: "กระป๋อง",      cat: "recyclable" },
+  { emoji: "📰", name: "กระดาษ",       cat: "recyclable" },
+  { emoji: "🧴", name: "ขวดพลาสติก",   cat: "recyclable" },
+  { emoji: "🍌", name: "เปลือกกล้วย",  cat: "organic" },
+  { emoji: "🍎", name: "เศษผลไม้",     cat: "organic" },
+  { emoji: "🍗", name: "เศษอาหาร",     cat: "organic" },
+  { emoji: "🥬", name: "เศษผัก",       cat: "organic" },
+  { emoji: "🔋", name: "ถ่านไฟฉาย",    cat: "hazardous" },
+  { emoji: "💡", name: "หลอดไฟ",       cat: "hazardous" },
+  { emoji: "📱", name: "มือถือเก่า",   cat: "hazardous" },
+  { emoji: "🧪", name: "สารเคมี",      cat: "hazardous" }
+];
+
+/* ============================ GAME STATE ============================ */
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let W = 0, H = 0;
+let items = [];            // active trash items
+let bins = [];             // bin rects, computed on resize
+let particles = [];        // effect particles
+let floatTexts = [];       // "+10" / "-5" popups
+let score = 0, correctCount = 0, wrongCount = 0;
+let lastSpawn = 0;
+let nextItemId = 1;
+
+const hand = {
+  present: false,
+  x: 0, y: 0,              // smoothed cursor (midpoint of thumb & index tips)
+  rawX: 0, rawY: 0,
+  pinching: false,
+  grabbedId: null,
+  landmarks: null
+};
+
+let audioCtx = null;
+
+/* ============================== SETUP =============================== */
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  layoutBins();
+}
+window.addEventListener("resize", resize);
+
+function layoutBins() {
+  const keys = Object.keys(CATEGORIES);
+  const bw = Math.min(190, (W - 60) / 4);
+  const bh = Math.min(150, H * 0.2);
+  const gap = (W - bw * 4) / 5;
+  bins = keys.map((key, i) => ({
+    key,
+    x: gap + i * (bw + gap),
+    y: H - bh - 12,
+    w: bw, h: bh,
+    flash: 0, flashColor: null
+  }));
+}
+
+/* ============================ TRASH ITEMS =========================== */
+function spawnItem() {
+  if (items.length >= CONFIG.maxItems) return;
+  const type = TRASH_TYPES[Math.floor(Math.random() * TRASH_TYPES.length)];
+  const r = 44;
+  items.push({
+    id: nextItemId++,
+    ...type,
+    x: r + 40 + Math.random() * (W - 2 * r - 80),
+    y: 120 + Math.random() * (H * 0.4),
+    r,
+    bobPhase: Math.random() * Math.PI * 2,
+    grabbed: false,
+    scale: 0    // pop-in animation
+  });
+}
+
+/* =========================== HAND TRACKING ========================== */
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function onResults(results) {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const lm = results.multiHandLandmarks[0];
+    hand.present = true;
+    hand.landmarks = lm;
+
+    // Cursor = midpoint of thumb tip (4) and index tip (8). Mirror X.
+    const cx = (1 - (lm[4].x + lm[8].x) / 2) * W;
+    const cy = ((lm[4].y + lm[8].y) / 2) * H;
+    hand.rawX = cx; hand.rawY = cy;
+    hand.x += (cx - hand.x) * CONFIG.cursorSmoothing;
+    hand.y += (cy - hand.y) * CONFIG.cursorSmoothing;
+
+    // Pinch detection: thumb-index distance relative to hand size (wrist→middle MCP)
+    const handSize = dist(lm[0], lm[9]) || 1e-6;
+    const ratio = dist(lm[4], lm[8]) / handSize;
+
+    if (!hand.pinching && ratio < CONFIG.pinchOn) {
+      hand.pinching = true;
+      tryGrab();
+    } else if (hand.pinching && ratio > CONFIG.pinchOff) {
+      hand.pinching = false;
+      tryDrop();
+    }
+  } else {
+    if (hand.pinching) { hand.pinching = false; tryDrop(); }
+    hand.present = false;
+    hand.landmarks = null;
+  }
+}
+
+function tryGrab() {
+  if (hand.grabbedId !== null) return;
+  let best = null, bestD = CONFIG.grabRadius;
+  for (const it of items) {
+    const d = Math.hypot(it.x - hand.x, it.y - hand.y);
+    if (d < bestD) { best = it; bestD = d; }
+  }
+  if (best) {
+    best.grabbed = true;
+    hand.grabbedId = best.id;
+    beep(600, 0.06, "sine", 0.15);
+  }
+}
+
+function tryDrop() {
+  if (hand.grabbedId === null) return;
+  const it = items.find(i => i.id === hand.grabbedId);
+  hand.grabbedId = null;
+  if (!it) return;
+  it.grabbed = false;
+
+  const bin = bins.find(b =>
+    it.x > b.x && it.x < b.x + b.w && it.y > b.y - 30 && it.y < b.y + b.h);
+
+  if (!bin) return; // dropped in open space — item stays
+
+  const correct = bin.key === it.cat;
+  items = items.filter(i => i.id !== it.id);
+
+  if (correct) {
+    score += CONFIG.scoreCorrect; correctCount++;
+    bin.flash = 1; bin.flashColor = "#2ecc71";
+    addFloatText(`+${CONFIG.scoreCorrect}`, it.x, it.y, "#2ecc71");
+    burstParticles(it.x, it.y, CATEGORIES[bin.key].color);
+    beep(880, 0.1, "sine", 0.2); setTimeout(() => beep(1320, 0.12, "sine", 0.2), 90);
+  } else {
+    score += CONFIG.scoreWrong; wrongCount++;
+    bin.flash = 1; bin.flashColor = "#e74c3c";
+    addFloatText(`${CONFIG.scoreWrong}`, it.x, it.y, "#e74c3c");
+    addFloatText(`❌ ${it.name} → ถัง${CATEGORIES[it.cat].label}`, W / 2, H * 0.35, "#ff8a80");
+    beep(200, 0.25, "sawtooth", 0.15);
+  }
+}
+
+/* ============================== EFFECTS ============================= */
+function addFloatText(text, x, y, color) {
+  floatTexts.push({ text, x, y, color, life: 1 });
+}
+function burstParticles(x, y, color) {
+  for (let i = 0; i < 24; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 5;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2,
+      r: 3 + Math.random() * 4, color, life: 1 });
+  }
+}
+function beep(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+
+/* ============================== RENDER ============================== */
+function drawVideo() {
+  ctx.save();
+  ctx.translate(W, 0); ctx.scale(-1, 1); // mirror so it feels natural
+  // cover-fit the video into the canvas
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const s = Math.max(W / vw, H / vh);
+  const dw = vw * s, dh = vh * s;
+  ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  ctx.restore();
+  // slight dark tint for readability
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawBins() {
+  for (const b of bins) {
+    const cat = CATEGORIES[b.key];
+    ctx.save();
+    // flash effect
+    if (b.flash > 0) {
+      ctx.shadowColor = b.flashColor; ctx.shadowBlur = 40 * b.flash;
+      b.flash = Math.max(0, b.flash - 0.03);
+    }
+    // body
+    roundRect(b.x, b.y, b.w, b.h, 14);
+    ctx.fillStyle = cat.color + "cc";
+    ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.stroke();
+    // lid
+    roundRect(b.x - 6, b.y - 12, b.w + 12, 18, 8);
+    ctx.fillStyle = cat.color;
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+
+    // labels
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff";
+    ctx.font = `bold ${Math.min(26, b.w * 0.15)}px sans-serif`;
+    ctx.fillText(`🗑️ ${cat.label}`, b.x + b.w / 2, b.y + b.h * 0.45);
+    ctx.font = `${Math.min(18, b.w * 0.11)}px sans-serif`;
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillText(cat.en, b.x + b.w / 2, b.y + b.h * 0.72);
+  }
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawItems(t) {
+  for (const it of items) {
+    if (it.scale < 1) it.scale = Math.min(1, it.scale + 0.08); // pop-in
+    if (it.grabbed) {
+      it.x += (hand.x - it.x) * 0.5;
+      it.y += (hand.y - it.y) * 0.5;
+    } else {
+      it.y += Math.sin(t / 600 + it.bobPhase) * 0.3; // gentle float
+    }
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    const sc = it.scale * (it.grabbed ? 1.25 : 1);
+    ctx.scale(sc, sc);
+    if (it.grabbed) { ctx.shadowColor = "#fff"; ctx.shadowBlur = 25; }
+    // background disc
+    ctx.beginPath(); ctx.arc(0, 0, it.r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = it.grabbed ? "#fff" : CATEGORIES[it.cat].color;
+    ctx.stroke();
+    // emoji
+    ctx.font = `${it.r * 1.1}px sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(it.emoji, 0, 4);
+    ctx.restore();
+    // name tag
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 4;
+    ctx.fillText(it.name, it.x, it.y + it.r + 20);
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawHand() {
+  if (!hand.present) return;
+  // fingertip skeleton dots (subtle)
+  if (hand.landmarks) {
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    for (const i of [0, 5, 9, 13, 17]) {
+      const p = hand.landmarks[i];
+      ctx.beginPath();
+      ctx.arc((1 - p.x) * W, p.y * H, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // cursor
+  ctx.save();
+  ctx.translate(hand.x, hand.y);
+  ctx.lineWidth = 4;
+  if (hand.pinching) {
+    ctx.strokeStyle = "#2ecc71"; ctx.fillStyle = "rgba(46,204,113,0.35)";
+    ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.font = "22px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("👌", 0, 1);
+  } else {
+    ctx.strokeStyle = "#fff"; ctx.fillStyle = "rgba(255,255,255,0.15)";
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.font = "24px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("✋", 0, 1);
+  }
+  ctx.restore();
+}
+
+function drawEffects() {
+  // particles
+  for (const p of particles) {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.life -= 0.02;
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  particles = particles.filter(p => p.life > 0);
+
+  // float texts
+  for (const f of floatTexts) {
+    f.y -= 1.2; f.life -= 0.012;
+    ctx.globalAlpha = Math.max(0, f.life);
+    ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";
+    ctx.fillStyle = f.color;
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 6;
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+  floatTexts = floatTexts.filter(f => f.life > 0);
+}
+
+function drawHUD() {
+  ctx.save();
+  roundRect(16, 14, 300, 74, 12);
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "left";
+  ctx.font = "bold 30px sans-serif";
+  ctx.fillText(`⭐ ${score}`, 34, 52);
+  ctx.font = "16px sans-serif";
+  ctx.fillStyle = "#7fd8a5";
+  ctx.fillText(`✔ ถูก ${correctCount}`, 150, 42);
+  ctx.fillStyle = "#ff8a80";
+  ctx.fillText(`✘ ผิด ${wrongCount}`, 150, 68);
+  ctx.restore();
+
+  if (!hand.present) {
+    ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.shadowColor = "#000"; ctx.shadowBlur = 6;
+    ctx.fillText("✋ ยกมือขึ้นให้กล้องเห็น (Show your hand to the camera)", W / 2, 60);
+    ctx.shadowBlur = 0;
+  }
+}
+
+/* ============================ MAIN LOOP ============================= */
+function loop(t) {
+  ctx.clearRect(0, 0, W, H);
+  if (video.readyState >= 2) drawVideo();
+
+  if (t - lastSpawn > CONFIG.spawnEveryMs) { spawnItem(); lastSpawn = t; }
+
+  drawBins();
+  drawItems(t);
+  drawEffects();
+  drawHand();
+  drawHUD();
+  requestAnimationFrame(loop);
+}
+
+/* =============================== BOOT =============================== */
+document.getElementById("startBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("startBtn");
+  const loading = document.getElementById("loading");
+  btn.style.display = "none"; loading.style.display = "block";
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  resize();
+
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
+  });
+  hands.onResults(onResults);
+
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 1280, height: 720
+  });
+
+  try {
+    await camera.start();
+  } catch (err) {
+    loading.textContent = "❌ เปิดกล้องไม่ได้: " + err.message;
+    return;
+  }
+
+  document.getElementById("overlay").style.display = "none";
+  lastSpawn = performance.now();
+  spawnItem(); spawnItem();
+  requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
