@@ -18,6 +18,7 @@
       var(--pastelYellow), var(--pastelGreen), var(--pastelBlue), var(--pastelPurple));
   }
   canvas { position: absolute; inset: 0; display: block; }
+  #cameraFeed { display: none; }
 
   .screen {
     position: absolute; inset: 0; z-index: 20; display: none;
@@ -80,6 +81,9 @@
 </head>
 <body>
 
+<!-- hidden webcam feed driven by MediaPipe Camera -->
+<video id="cameraFeed" playsinline></video>
+
 <!-- ===================== START SCREEN ===================== -->
 <div id="startScreen" class="screen active">
   <div class="card">
@@ -108,7 +112,7 @@
     <button id="startGameBtn" class="btn">▶ เริ่มเกม (Start)</button>
     <button id="openHistoryBtn" class="btn secondary">📊 ประวัติการเล่น (History)</button>
     <p class="subtitle" style="margin-top:14px; font-size:.85rem;">
-      ต้องใช้เว็บแคม — โมเดล Handpose (ml5.js): <span id="modelStatus">กำลังโหลด...</span>
+      ต้องใช้เว็บแคม — โมเดลติดตามมือ (MediaPipe Hands): <span id="modelStatus">กำลังโหลด...</span>
     </p>
   </div>
 </div>
@@ -162,8 +166,10 @@
   </div>
 </div>
 
+<!-- p5.js for rendering + MediaPipe Hands for smooth webcam tracking -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
-<script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
 "use strict";
@@ -171,14 +177,14 @@
 /* ============================== CONFIG ============================== */
 const gameConfig = {
   roundDuration: 60,        // seconds per round
-  pinchOnRatio: 0.45,       // pinch begins below this (thumb-index / hand size)
-  pinchOffRatio: 0.62,      // pinch ends above this (hysteresis)
-  grabRadius: 75,           // px
+  pinchOnRatio: 0.40,       // pinch begins below this (thumb-index / hand size)
+  pinchOffRatio: 0.55,      // pinch ends above this (hysteresis stops flicker)
+  grabRadius: 85,           // px — generous grab area
   maxItems: 4,
   spawnEveryMs: 1700,
   scoreCorrect: 10,
   scoreWrong: -5,
-  cursorSmoothing: 0.45,
+  cursorSmoothing: 0.5,     // higher = snappier tracking
   historyStorageKey: "trashSortGameHistory"
 };
 
@@ -213,8 +219,9 @@ const rainbowPastels = ["#ffb3c8", "#ffd2a8", "#fff3a8", "#b8f0c0", "#a8d8ff", "
 
 /* ============================ GAME STATE ============================ */
 let gameState = "menu";        // "menu" | "playing" | "ended"
-let captureVideo = null;
-let handPoseModel = null;
+let cameraFeed = null;         // hidden HTML <video> element
+let handTracker = null;        // MediaPipe Hands instance
+let cameraController = null;   // MediaPipe Camera instance
 let modelReady = false;
 let videoReady = false;
 let detectedHands = [];
@@ -252,12 +259,22 @@ function setup() {
   textAlign(CENTER, CENTER);
   layoutBins();
 
-  // Preload the ml5 Handpose model in the background (flipped for mirror view)
-  handPoseModel = ml5.handPose({ maxHands: 1, flipped: true }, () => {
-    modelReady = true;
-    const statusEl = document.getElementById("modelStatus");
-    if (statusEl) { statusEl.textContent = "พร้อมแล้ว ✅"; statusEl.style.color = "#3daf6e"; }
+  cameraFeed = document.getElementById("cameraFeed");
+
+  // MediaPipe Hands — much smoother/steadier tracking than ml5 Handpose
+  handTracker = new Hands({
+    locateFile: fileName => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${fileName}`
   });
+  handTracker.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
+  });
+  handTracker.onResults(onHandResults);
+  modelReady = true;
+  const statusEl = document.getElementById("modelStatus");
+  if (statusEl) { statusEl.textContent = "พร้อมแล้ว ✅"; statusEl.style.color = "#3daf6e"; }
 }
 
 function windowResized() {
@@ -280,35 +297,38 @@ function draw() {
 
 /* ======================= CAMERA & HAND TRACKING ===================== */
 function startCameraIfNeeded() {
-  if (captureVideo) return;
-  captureVideo = createCapture(VIDEO, () => {
-    videoReady = true;
-    handPoseModel.detectStart(captureVideo, gotHands);
+  if (cameraController) return;
+  cameraController = new Camera(cameraFeed, {
+    onFrame: async () => {
+      if (!videoReady && cameraFeed.videoWidth) videoReady = true;
+      await handTracker.send({ image: cameraFeed });
+    },
+    width: 1280,
+    height: 720
   });
-  captureVideo.size(640, 480);
-  captureVideo.hide();
+  cameraController.start();
 }
 
-function gotHands(results) {
-  detectedHands = results || [];
+function onHandResults(results) {
+  detectedHands = (results && results.multiHandLandmarks) || [];
   if (gameState !== "playing") return;
 
   if (detectedHands.length > 0) {
-    const keypoints = detectedHands[0].keypoints;
-    const wristPoint = keypoints[0];
-    const thumbTip = keypoints[4];
-    const indexTip = keypoints[8];
-    const middleMcp = keypoints[9];
+    const landmarks = detectedHands[0];
+    const wristPoint = landmarks[0];
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    const middleMcp = landmarks[9];
 
     handCursor.present = true;
-    const midVideoX = (thumbTip.x + indexTip.x) / 2;
-    const midVideoY = (thumbTip.y + indexTip.y) / 2;
-    const screenPos = videoToScreen(midVideoX, midVideoY);
+    const midNormX = (thumbTip.x + indexTip.x) / 2;
+    const midNormY = (thumbTip.y + indexTip.y) / 2;
+    const screenPos = landmarkToScreen(midNormX, midNormY);
     handCursor.x += (screenPos.x - handCursor.x) * gameConfig.cursorSmoothing;
     handCursor.y += (screenPos.y - handCursor.y) * gameConfig.cursorSmoothing;
 
-    const handSize = dist(wristPoint.x, wristPoint.y, middleMcp.x, middleMcp.y) || 1e-6;
-    const pinchRatio = dist(thumbTip.x, thumbTip.y, indexTip.x, indexTip.y) / handSize;
+    const handSize = Math.hypot(wristPoint.x - middleMcp.x, wristPoint.y - middleMcp.y) || 1e-6;
+    const pinchRatio = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y) / handSize;
 
     if (!handCursor.pinching && pinchRatio < gameConfig.pinchOnRatio) {
       handCursor.pinching = true;
@@ -323,14 +343,18 @@ function gotHands(results) {
   }
 }
 
-// Map a point in video pixel space (already flipped by ml5) onto the cover-fitted canvas
-function videoToScreen(videoX, videoY) {
-  const videoW = (captureVideo && captureVideo.elt.videoWidth) || 640;
-  const videoH = (captureVideo && captureVideo.elt.videoHeight) || 480;
+// Map a normalized MediaPipe landmark (0..1) onto the cover-fitted, mirrored canvas
+function landmarkToScreen(normX, normY) {
+  const videoW = cameraFeed.videoWidth || 1280;
+  const videoH = cameraFeed.videoHeight || 720;
   const scaleFactor = Math.max(width / videoW, height / videoH);
-  const offsetX = (width - videoW * scaleFactor) / 2;
-  const offsetY = (height - videoH * scaleFactor) / 2;
-  return { x: videoX * scaleFactor + offsetX, y: videoY * scaleFactor + offsetY };
+  const drawW = videoW * scaleFactor;
+  const drawH = videoH * scaleFactor;
+  const offsetX = (width - drawW) / 2;
+  const offsetY = (height - drawH) / 2;
+  const pixelX = normX * drawW + offsetX;
+  const pixelY = normY * drawH + offsetY;
+  return { x: width - pixelX, y: pixelY }; // mirror horizontally
 }
 
 /* ============================ GAME LOGIC ============================ */
@@ -446,26 +470,28 @@ function tryDropItem() {
 
 /* ============================== RENDER ============================== */
 function drawIdleBackground() {
-  // soft animated pastel wash behind the overlay screens
   background("#f6f0ff");
 }
 
 function drawVideoBackground() {
   background("#f6f0ff");
-  if (captureVideo && videoReady) {
-    const videoW = captureVideo.elt.videoWidth || 640;
-    const videoH = captureVideo.elt.videoHeight || 480;
+  if (videoReady && cameraFeed.videoWidth) {
+    const videoW = cameraFeed.videoWidth;
+    const videoH = cameraFeed.videoHeight;
     const scaleFactor = Math.max(width / videoW, height / videoH);
     const drawW = videoW * scaleFactor;
     const drawH = videoH * scaleFactor;
-    push();
-    translate(width, 0); scale(-1, 1); // mirror view
-    image(captureVideo, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
-    pop();
+    const offsetX = (width - drawW) / 2;
+    const offsetY = (height - drawH) / 2;
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.translate(width, 0);
+    ctx.scale(-1, 1); // mirror view feels natural
+    ctx.drawImage(cameraFeed, offsetX, offsetY, drawW, drawH);
+    ctx.restore();
   }
-  // pastel wash on top of the video
   noStroke();
-  fill(255, 240, 250, 60);
+  fill(255, 240, 250, 60); // soft pastel wash over the camera
   rect(0, 0, width, height);
 }
 
@@ -594,7 +620,6 @@ function drawEffects() {
 }
 
 function drawHud() {
-  // score card
   push();
   noStroke();
   fill(255, 255, 255, 200);
@@ -607,7 +632,6 @@ function drawHud() {
   pop();
   textAlign(CENTER, CENTER);
 
-  // countdown timer
   const secondsShown = Math.ceil(timeLeft);
   const urgent = secondsShown <= 10;
   const pulse = urgent ? 1 + 0.08 * Math.sin(millis() / 120) : 1;
@@ -623,7 +647,6 @@ function drawHud() {
   pop();
   textStyle(NORMAL);
 
-  // timer progress bar (rainbow)
   const barW = 320;
   const progress = timeLeft / gameConfig.roundDuration;
   push();
@@ -638,7 +661,6 @@ function drawHud() {
   }
   pop();
 
-  // player tag
   push();
   noStroke();
   fill(255, 255, 255, 200);
@@ -729,7 +751,6 @@ function renderHistoryTable() {
 
   let historyRecords = loadHistory();
 
-  // populate the room filter options (keep current selection)
   const roomFilterSelect = document.getElementById("roomFilterSelect");
   const uniqueRooms = [...new Set(loadHistory().map(record => record.roomName))].sort();
   const previousValue = roomFilterSelect.value;
@@ -737,12 +758,10 @@ function renderHistoryTable() {
     uniqueRooms.map(room => `<option value="${escapeHtml(room)}">${escapeHtml(room)}</option>`).join("");
   roomFilterSelect.value = uniqueRooms.includes(previousValue) ? previousValue : "";
 
-  // filter
   if (roomFilter) historyRecords = historyRecords.filter(record => record.roomName === roomFilter);
   if (nameFilter) historyRecords = historyRecords.filter(record =>
     record.playerName.toLowerCase().includes(nameFilter));
 
-  // sort
   const sortFunctions = {
     scoreDesc: (a, b) => b.score - a.score,
     nameAsc: (a, b) => a.playerName.localeCompare(b.playerName, "th"),
@@ -797,7 +816,7 @@ document.getElementById("startGameBtn").addEventListener("click", () => {
     return;
   }
   if (!modelReady) {
-    errorEl.textContent = "⏳ โมเดล Handpose กำลังโหลด รอสักครู่แล้วลองอีกครั้ง";
+    errorEl.textContent = "⏳ โมเดลกำลังโหลด รอสักครู่แล้วลองอีกครั้ง";
     return;
   }
   errorEl.textContent = "";
