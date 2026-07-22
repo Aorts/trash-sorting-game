@@ -58,6 +58,26 @@
   .binLegend { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 14px 0 6px; }
   .binChip { padding: 8px 16px; border-radius: 20px; font-size: .88rem; font-weight: 700; color: #5a4a6a; }
 
+  /* round-time selector */
+  .timeBlock { margin-bottom: 18px; }
+  .timeBlock > label { display: block; font-weight: 700; font-size: .9rem; margin-bottom: 10px; }
+  .timeChipRow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
+  .timeChip {
+    padding: 10px 22px; border-radius: 22px; font-size: .95rem; font-weight: 700;
+    cursor: pointer; color: var(--inkDark); background: rgba(255,255,255,.9);
+    border: 3px solid var(--pastelBlue); transition: transform .12s, background .12s;
+  }
+  .timeChip:hover { transform: translateY(-2px); }
+  .timeChip.selected {
+    background: linear-gradient(135deg, #ffd6e8, #d4bdf5);
+    border-color: #b39df2; box-shadow: 0 4px 14px rgba(180,140,220,.35);
+  }
+  #customTimeInput {
+    font-size: .95rem; padding: 10px 14px; border-radius: 18px; width: 130px; text-align: center;
+    border: 3px solid var(--pastelBlue); background: #fff; color: var(--inkDark); outline: none;
+  }
+  #customTimeInput:focus { border-color: #c8a8f0; }
+
   /* history */
   .filterBar { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 18px; }
   .filterBar select, .filterBar input {
@@ -89,7 +109,7 @@
   <div class="card">
     <h1>🌈 Trash Sorting Game</h1>
     <p class="subtitle">
-      เกมแยกขยะด้วยมือเปล่า — จีบนิ้ว 👌 หยิบขยะ ลากไปทิ้งให้ถูกถังภายใน 60 วินาที!<br>
+      เกมแยกขยะด้วยมือเปล่า — จีบนิ้ว 👌 หยิบขยะ ลากไปทิ้งให้ถูกถังภายในเวลาที่กำหนด!<br>
       ถูกถัง +10 | ผิดถัง −5
     </p>
     <div class="binLegend">
@@ -106,6 +126,16 @@
       <div>
         <label for="roomNameInput">🚪 ห้อง (Room)</label>
         <input id="roomNameInput" maxlength="20" placeholder="เช่น ป.5/1">
+      </div>
+    </div>
+    <div class="timeBlock">
+      <label>⏱ ตั้งเวลาต่อรอบ (Time per round)</label>
+      <div class="timeChipRow">
+        <button class="timeChip" data-seconds="30" type="button">30 วิ</button>
+        <button class="timeChip selected" data-seconds="60" type="button">60 วิ</button>
+        <button class="timeChip" data-seconds="90" type="button">90 วิ</button>
+        <button class="timeChip" data-seconds="120" type="button">120 วิ</button>
+        <input id="customTimeInput" type="number" min="10" max="300" step="5" placeholder="กำหนดเอง">
       </div>
     </div>
     <div id="startError" class="errorMsg"></div>
@@ -154,7 +184,7 @@
     <div class="tableWrap">
       <table>
         <thead>
-          <tr><th>#</th><th>👤 ชื่อ</th><th>🚪 ห้อง</th><th>🏆 คะแนน</th><th>✔/✘</th><th>📅 วันที่เล่น</th></tr>
+          <tr><th>#</th><th>👤 ชื่อ</th><th>🚪 ห้อง</th><th>🏆 คะแนน</th><th>✔/✘</th><th>⏱ เวลา</th><th>📅 วันที่เล่น</th></tr>
         </thead>
         <tbody id="historyTableBody"></tbody>
       </table>
@@ -176,7 +206,9 @@
 
 /* ============================== CONFIG ============================== */
 const gameConfig = {
-  roundDuration: 60,        // seconds per round
+  defaultRoundDuration: 60, // seconds per round (player can change on the start screen)
+  minRoundDuration: 10,
+  maxRoundDuration: 300,
   pinchOnRatio: 0.40,       // pinch begins below this (thumb-index / hand size)
   pinchOffRatio: 0.55,      // pinch ends above this (hysteresis stops flicker)
   grabRadius: 85,           // px — generous grab area
@@ -185,7 +217,8 @@ const gameConfig = {
   scoreCorrect: 10,
   scoreWrong: -5,
   cursorSmoothing: 0.5,     // higher = snappier tracking
-  historyStorageKey: "trashSortGameHistory"
+  historyStorageKey: "trashSortGameHistory",
+  durationStorageKey: "trashSortGameLastDuration"
 };
 
 /* ================== PASTEL THEME / CATEGORIES / ITEMS =============== */
@@ -240,7 +273,8 @@ let lastSpawnTime = 0;
 let nextItemId = 1;
 
 let roundStartMillis = 0;
-let timeLeft = gameConfig.roundDuration;
+let selectedRoundDuration = gameConfig.defaultRoundDuration; // chosen on the start screen
+let timeLeft = selectedRoundDuration;
 let lastTickSecond = -1;
 let recordSaved = false;
 
@@ -365,7 +399,7 @@ function startRound() {
   nextItemId = 1;
   recordSaved = false;
   roundStartMillis = millis();
-  timeLeft = gameConfig.roundDuration;
+  timeLeft = selectedRoundDuration;
   lastTickSecond = -1;
   lastSpawnTime = millis();
   spawnTrashItem(); spawnTrashItem();
@@ -373,7 +407,7 @@ function startRound() {
 }
 
 function updateTimer() {
-  timeLeft = Math.max(0, gameConfig.roundDuration - (millis() - roundStartMillis) / 1000);
+  timeLeft = Math.max(0, selectedRoundDuration - (millis() - roundStartMillis) / 1000);
   const wholeSecond = Math.ceil(timeLeft);
   if (wholeSecond !== lastTickSecond) {
     lastTickSecond = wholeSecond;
@@ -648,7 +682,7 @@ function drawHud() {
   textStyle(NORMAL);
 
   const barW = 320;
-  const progress = timeLeft / gameConfig.roundDuration;
+  const progress = timeLeft / selectedRoundDuration;
   push();
   noStroke();
   fill(255, 255, 255, 160);
@@ -725,6 +759,7 @@ function saveGameRecord() {
     score: currentScore,
     correctCount,
     wrongCount,
+    durationSeconds: selectedRoundDuration,
     playedAt: new Date().toISOString()
   });
   try {
@@ -781,6 +816,7 @@ function renderHistoryTable() {
       <td>${escapeHtml(record.roomName)}</td>
       <td class="scoreCell">${record.score}</td>
       <td>✔${record.correctCount ?? "-"} / ✘${record.wrongCount ?? "-"}</td>
+      <td>${record.durationSeconds ?? gameConfig.defaultRoundDuration} วิ</td>
       <td>${formatPlayedDate(record.playedAt)}</td>
     </tr>`).join("");
   emptyMsg.style.display = historyRecords.length === 0 ? "block" : "none";
@@ -791,6 +827,58 @@ function escapeHtml(rawText) {
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
+
+/* ==================== ROUND-TIME SELECTOR (UI) ====================== */
+function highlightTimeChips() {
+  for (const chipEl of document.querySelectorAll(".timeChip")) {
+    chipEl.classList.toggle("selected", Number(chipEl.dataset.seconds) === selectedRoundDuration);
+  }
+}
+
+function applyRoundDuration(seconds, fromCustomInput) {
+  const clampedSeconds = Math.round(
+    Math.min(gameConfig.maxRoundDuration, Math.max(gameConfig.minRoundDuration, seconds)));
+  selectedRoundDuration = clampedSeconds;
+  timeLeft = clampedSeconds;
+  highlightTimeChips();
+  if (!fromCustomInput) document.getElementById("customTimeInput").value = "";
+  try {
+    localStorage.setItem(gameConfig.durationStorageKey, String(clampedSeconds));
+  } catch (err) {
+    console.warn("ไม่สามารถบันทึกเวลาที่เลือกได้:", err);
+  }
+}
+
+function restoreSavedDuration() {
+  let savedSeconds = gameConfig.defaultRoundDuration;
+  try {
+    const rawValue = localStorage.getItem(gameConfig.durationStorageKey);
+    if (rawValue && Number.isFinite(Number(rawValue))) savedSeconds = Number(rawValue);
+  } catch (err) {
+    savedSeconds = gameConfig.defaultRoundDuration;
+  }
+  selectedRoundDuration = Math.min(gameConfig.maxRoundDuration,
+    Math.max(gameConfig.minRoundDuration, Math.round(savedSeconds)));
+  timeLeft = selectedRoundDuration;
+  highlightTimeChips();
+  // if the saved value is not one of the presets, show it in the custom box
+  const presetSeconds = [...document.querySelectorAll(".timeChip")].map(chipEl => Number(chipEl.dataset.seconds));
+  if (!presetSeconds.includes(selectedRoundDuration)) {
+    document.getElementById("customTimeInput").value = selectedRoundDuration;
+  }
+}
+
+for (const chipEl of document.querySelectorAll(".timeChip")) {
+  chipEl.addEventListener("click", () => applyRoundDuration(Number(chipEl.dataset.seconds), false));
+}
+
+document.getElementById("customTimeInput").addEventListener("input", event => {
+  const typedSeconds = Number(event.target.value);
+  if (!event.target.value || !Number.isFinite(typedSeconds)) return;
+  applyRoundDuration(typedSeconds, true);
+});
+
+restoreSavedDuration();
 
 /* ============================ UI WIRING ============================= */
 let historyReturnScreen = "startScreen";
@@ -814,6 +902,17 @@ document.getElementById("startGameBtn").addEventListener("click", () => {
   if (!playerNameValue || !roomNameValue) {
     errorEl.textContent = "⚠️ กรุณากรอกชื่อผู้เล่นและห้องก่อนเริ่มเกม";
     return;
+  }
+  const customTimeValue = document.getElementById("customTimeInput").value;
+  if (customTimeValue) {
+    const typedSeconds = Number(customTimeValue);
+    if (!Number.isFinite(typedSeconds) ||
+        typedSeconds < gameConfig.minRoundDuration || typedSeconds > gameConfig.maxRoundDuration) {
+      errorEl.textContent =
+        `⚠️ เวลาต้องอยู่ระหว่าง ${gameConfig.minRoundDuration}–${gameConfig.maxRoundDuration} วินาที`;
+      return;
+    }
+    applyRoundDuration(typedSeconds, true);
   }
   if (!modelReady) {
     errorEl.textContent = "⏳ โมเดลกำลังโหลด รอสักครู่แล้วลองอีกครั้ง";
